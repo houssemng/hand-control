@@ -4,16 +4,11 @@ import React, { useRef, useEffect, useState } from "react";
 import {
   Camera,
   Maximize2,
-  RefreshCw,
-  Sliders,
-  Eye,
-  EyeOff,
   FlipHorizontal,
-  Pause,
-  Play,
-  Volume2,
-  VolumeX,
+  Sliders,
   Zap,
+  Activity,
+  Layers,
 } from "lucide-react";
 
 export interface CameraFeed {
@@ -21,234 +16,76 @@ export interface CameraFeed {
   name: string;
   deviceId?: string;
   stream?: MediaStream | null;
+  streamUrl?: string; // MJPEG stream URL from Hand Control
   isSimulated?: boolean;
   simulatedAngle?: string;
   status: "live" | "connecting" | "paused" | "error";
+  fps?: number;
+  resolution?: string;
+  gesture?: string;
+  stateLabel?: string;
   errorMsg?: string;
 }
 
 interface CameraCardProps {
   cam: CameraFeed;
   onMaximize: (camId: string) => void;
-  onTogglePause: (camId: string) => void;
+  onTogglePause?: (camId: string) => void;
   onSnapshotReady?: (dataUrl: string) => void;
   currentGesture?: string;
-  gestureConfidence?: number;
 }
 
 export default function CameraCard({
   cam,
   onMaximize,
-  onTogglePause,
-  onSnapshotReady,
   currentGesture = "NONE",
-  gestureConfidence = 0.94,
 }: CameraCardProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
 
-  const [isMirrored, setIsMirrored] = useState(true);
-  const [showSkeleton, setShowSkeleton] = useState(true);
+  const [isMirrored, setIsMirrored] = useState(false); // Python feed is already mirrored
   const [showFilters, setShowFilters] = useState(false);
-  const [fps, setFps] = useState(30);
-  const [resolution, setResolution] = useState("1280x720");
-
-  // Filter adjustments
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast] = useState(100);
-  const [saturation, setSaturation] = useState(100);
   const [zoom, setZoom] = useState(1);
 
-  // Attach stream to video element
+  // Attach MediaStream if available
   useEffect(() => {
-    if (!videoRef.current) return;
-    if (cam.stream) {
-      videoRef.current.srcObject = cam.stream;
-      videoRef.current.play().catch(() => {});
-    }
+    if (!videoRef.current || !cam.stream) return;
+    videoRef.current.srcObject = cam.stream;
+    videoRef.current.play().catch(() => {});
   }, [cam.stream]);
 
-  // Video metadata listener for resolution
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    const handleLoadedMetadata = () => {
-      if (video.videoWidth && video.videoHeight) {
-        setResolution(`${video.videoWidth}x${video.videoHeight}`);
-      }
-    };
-
-    video.addEventListener("loadedmetadata", handleLoadedMetadata);
-    return () => video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-  }, []);
-
-  // Canvas drawing loop for cyber hand skeleton overlay & telemetry
-  useEffect(() => {
-    let animId: number;
-    let frameCount = 0;
-    let lastTime = performance.now();
-
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const render = () => {
-      // Calculate real FPS
-      frameCount++;
-      const now = performance.now();
-      if (now - lastTime >= 1000) {
-        setFps(Math.round((frameCount * 1000) / (now - lastTime)));
-        frameCount = 0;
-        lastTime = now;
-      }
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      if (showSkeleton && cam.status === "live") {
-        const cw = canvas.width;
-        const ch = canvas.height;
-
-        // Draw HUD targeting reticle & crosshairs
-        ctx.strokeStyle = "rgba(0, 240, 255, 0.25)";
-        ctx.lineWidth = 1;
-        ctx.strokeRect(cw * 0.15, ch * 0.15, cw * 0.7, ch * 0.7);
-
-        // Corner brackets
-        const bLen = 20;
-        ctx.strokeStyle = "rgba(0, 240, 255, 0.8)";
-        ctx.lineWidth = 2;
-
-        // Top Left
-        ctx.beginPath();
-        ctx.moveTo(cw * 0.15, ch * 0.15 + bLen);
-        ctx.lineTo(cw * 0.15, ch * 0.15);
-        ctx.lineTo(cw * 0.15 + bLen, ch * 0.15);
-        ctx.stroke();
-
-        // Top Right
-        ctx.beginPath();
-        ctx.moveTo(cw * 0.85 - bLen, ch * 0.15);
-        ctx.lineTo(cw * 0.85, ch * 0.15);
-        ctx.lineTo(cw * 0.85, ch * 0.15 + bLen);
-        ctx.stroke();
-
-        // Bottom Left
-        ctx.beginPath();
-        ctx.moveTo(cw * 0.15, ch * 0.85 - bLen);
-        ctx.lineTo(cw * 0.15, ch * 0.85);
-        ctx.lineTo(cw * 0.15 + bLen, ch * 0.85);
-        ctx.stroke();
-
-        // Bottom Right
-        ctx.beginPath();
-        ctx.moveTo(cw * 0.85 - bLen, ch * 0.85);
-        ctx.lineTo(cw * 0.85, ch * 0.85);
-        ctx.lineTo(cw * 0.85, ch * 0.85 - bLen);
-        ctx.stroke();
-
-        // Dynamic Hand Skeleton Demonstration / Landmark Simulation
-        const timeOffset = Date.now() / 1000;
-        const hx = cw * (0.5 + 0.05 * Math.sin(timeOffset));
-        const hy = ch * (0.55 + 0.03 * Math.cos(timeOffset * 1.2));
-        const scale = ch * 0.32;
-
-        // Draw Palm Joints
-        const joints = [
-          { x: hx, y: hy + scale * 0.4 }, // 0 Wrist
-          { x: hx - scale * 0.25, y: hy + scale * 0.2 }, // 1
-          { x: hx - scale * 0.35, y: hy }, // 2
-          { x: hx - scale * 0.4, y: hy - scale * 0.18 }, // 3
-          { x: hx - scale * 0.45, y: hy - scale * 0.35 }, // 4 Thumb Tip
-          { x: hx - scale * 0.15, y: hy - scale * 0.15 }, // 5 Index MCP
-          { x: hx - scale * 0.15, y: hy - scale * 0.35 }, // 6
-          { x: hx - scale * 0.15, y: hy - scale * 0.5 }, // 7
-          { x: hx - scale * 0.15, y: hy - scale * 0.65 }, // 8 Index Tip
-          { x: hx, y: hy - scale * 0.18 }, // 9 Middle MCP
-          { x: hx, y: hy - scale * 0.38 }, // 10
-          { x: hx, y: hy - scale * 0.55 }, // 11
-          { x: hx, y: hy - scale * 0.7 }, // 12 Middle Tip
-          { x: hx + scale * 0.15, y: hy - scale * 0.15 }, // 13 Ring MCP
-          { x: hx + scale * 0.15, y: hy - scale * 0.34 }, // 14
-          { x: hx + scale * 0.15, y: hy - scale * 0.48 }, // 15
-          { x: hx + scale * 0.15, y: hy - scale * 0.62 }, // 16 Ring Tip
-          { x: hx + scale * 0.28, y: hy - scale * 0.1 }, // 17 Pinky MCP
-          { x: hx + scale * 0.3, y: hy - scale * 0.26 }, // 18
-          { x: hx + scale * 0.3, y: hy - scale * 0.38 }, // 19
-          { x: hx + scale * 0.3, y: hy - scale * 0.5 }, // 20 Pinky Tip
-        ];
-
-        // Draw connections
-        const bones = [
-          [0, 1], [1, 2], [2, 3], [3, 4],
-          [0, 5], [5, 6], [6, 7], [7, 8],
-          [0, 9], [9, 10], [10, 11], [11, 12],
-          [0, 13], [13, 14], [14, 15], [15, 16],
-          [0, 17], [17, 18], [18, 19], [19, 20],
-          [5, 9], [9, 13], [13, 17],
-        ];
-
-        ctx.strokeStyle = "rgba(0, 240, 255, 0.75)";
-        ctx.lineWidth = 2.5;
-        bones.forEach(([s, e]) => {
-          ctx.beginPath();
-          ctx.moveTo(joints[s].x, joints[s].y);
-          ctx.lineTo(joints[e].x, joints[e].y);
-          ctx.stroke();
-        });
-
-        // Draw glowing nodes
-        joints.forEach((pt, i) => {
-          ctx.beginPath();
-          ctx.arc(pt.x, pt.y, i % 4 === 0 ? 5 : 3.5, 0, Math.PI * 2);
-          ctx.fillStyle = i % 4 === 0 ? "#10e599" : "#00f0ff";
-          ctx.fill();
-          ctx.strokeStyle = "#ffffff";
-          ctx.lineWidth = 1;
-          ctx.stroke();
-        });
-      }
-
-      animId = requestAnimationFrame(render);
-    };
-
-    render();
-    return () => cancelAnimationFrame(animId);
-  }, [showSkeleton, cam.status]);
-
-  // Take Snapshot function
+  // Snapshot handler
   const handleTakeSnapshot = () => {
-    const video = videoRef.current;
-    if (!video) return;
-
     const snapCanvas = document.createElement("canvas");
-    snapCanvas.width = video.videoWidth || 1280;
-    snapCanvas.height = video.videoHeight || 720;
+    snapCanvas.width = 1280;
+    snapCanvas.height = 720;
     const ctx = snapCanvas.getContext("2d");
     if (!ctx) return;
 
-    // Apply mirror if enabled
-    if (isMirrored) {
-      ctx.translate(snapCanvas.width, 0);
-      ctx.scale(-1, 1);
+    if (cam.streamUrl && imgRef.current) {
+      try {
+        ctx.drawImage(imgRef.current, 0, 0, snapCanvas.width, snapCanvas.height);
+      } catch {
+        // Cross-origin fallback
+        window.open(cam.streamUrl, "_blank");
+        return;
+      }
+    } else if (videoRef.current) {
+      ctx.drawImage(videoRef.current, 0, 0, snapCanvas.width, snapCanvas.height);
     }
-    ctx.drawImage(video, 0, 0, snapCanvas.width, snapCanvas.height);
 
     const dataUrl = snapCanvas.toDataURL("image/png");
-
-    // Download trigger
     const link = document.createElement("a");
     link.href = dataUrl;
     link.download = `handcontrol-${cam.id}-${Date.now()}.png`;
     link.click();
-
-    if (onSnapshotReady) onSnapshotReady(dataUrl);
   };
 
-  const getGesturePill = () => {
-    switch (currentGesture) {
+  const getPill = () => {
+    const g = cam.gesture || currentGesture;
+    switch (g) {
       case "THUMBS_UP":
         return { label: "👍 VOLUME UP", color: "var(--accent-cyan)", active: true };
       case "THUMBS_DOWN":
@@ -260,11 +97,11 @@ export default function CameraCard({
       case "PINCH":
         return { label: "👌 SPACE BAR", color: "var(--accent-green)", active: true };
       default:
-        return { label: "✋ HAND TRACKED", color: "var(--accent-green)", active: false };
+        return { label: cam.stateLabel || "HAND TRACKED", color: "var(--accent-green)", active: false };
     }
   };
 
-  const pill = getGesturePill();
+  const pill = getPill();
 
   return (
     <div
@@ -290,7 +127,7 @@ export default function CameraCard({
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span className={`pulse-dot ${cam.status === "live" ? "live" : "online"}`} />
+          <span className="pulse-dot live" />
           <span style={{ fontSize: "13px", fontWeight: "600", color: "#ffffff" }}>
             {cam.name}
           </span>
@@ -305,13 +142,15 @@ export default function CameraCard({
                 border: "1px solid rgba(168, 85, 247, 0.3)",
               }}
             >
-              {cam.simulatedAngle || "AI FEED"}
+              {cam.simulatedAngle || "AI STREAM"}
             </span>
           )}
         </div>
 
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{resolution}</span>
+          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+            {cam.resolution || "640x480"}
+          </span>
           <span
             style={{
               fontSize: "11px",
@@ -322,7 +161,7 @@ export default function CameraCard({
               borderRadius: "4px",
             }}
           >
-            {fps} FPS
+            {cam.fps || 30} FPS
           </span>
         </div>
       </div>
@@ -349,36 +188,38 @@ export default function CameraCard({
             justifyContent: "center",
           }}
         >
-          {/* HTML5 Video Element */}
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              transform: `${isMirrored ? "scaleX(-1)" : "scaleX(1)"} scale(${zoom})`,
-              filter: `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%)`,
-              transition: "transform 0.1s ease",
-            }}
-          />
-
-          {/* Canvas Overlay for Skeleton HUD */}
-          <canvas
-            ref={canvasRef}
-            width={640}
-            height={360}
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: "100%",
-              height: "100%",
-              pointerEvents: "none",
-            }}
-          />
+          {/* If MJPEG Stream URL from Hand Control is available */}
+          {cam.streamUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              ref={imgRef}
+              src={cam.streamUrl}
+              alt={cam.name}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transform: `${isMirrored ? "scaleX(-1)" : "scaleX(1)"} scale(${zoom})`,
+                filter: `brightness(${brightness}%) contrast(${contrast}%)`,
+                transition: "transform 0.1s ease",
+              }}
+            />
+          ) : (
+            /* Direct WebRTC Video Element */
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transform: `${isMirrored ? "scaleX(-1)" : "scaleX(1)"} scale(${zoom})`,
+                filter: `brightness(${brightness}%) contrast(${contrast}%)`,
+              }}
+            />
+          )}
 
           {/* Bottom Left Live Gesture Pill */}
           <div
@@ -404,7 +245,7 @@ export default function CameraCard({
             </span>
           </div>
 
-          {/* Quick Floating Toolbar (Top Right) */}
+          {/* Top Right Quick Controls */}
           <div
             style={{
               position: "absolute",
@@ -437,22 +278,9 @@ export default function CameraCard({
                 border: "none",
                 background: isMirrored ? "rgba(0, 240, 255, 0.15)" : "transparent",
               }}
-              title="Flip / Mirror Horizontal"
+              title="Flip Horizontal"
             >
               <FlipHorizontal size={15} color={isMirrored ? "var(--accent-cyan)" : "var(--text-muted)"} />
-            </button>
-
-            <button
-              onClick={() => setShowSkeleton(!showSkeleton)}
-              className="btn"
-              style={{
-                padding: "5px",
-                border: "none",
-                background: showSkeleton ? "rgba(16, 229, 153, 0.15)" : "transparent",
-              }}
-              title="Toggle AI Skeleton"
-            >
-              {showSkeleton ? <Eye size={15} color="var(--accent-green)" /> : <EyeOff size={15} color="var(--text-muted)" />}
             </button>
 
             <button
@@ -463,7 +291,7 @@ export default function CameraCard({
                 border: "none",
                 background: showFilters ? "rgba(255, 170, 0, 0.15)" : "transparent",
               }}
-              title="Camera Video Adjustments"
+              title="Video Adjustments"
             >
               <Sliders size={15} color={showFilters ? "var(--accent-amber)" : "var(--text-muted)"} />
             </button>
@@ -478,7 +306,7 @@ export default function CameraCard({
             </button>
           </div>
 
-          {/* Video Adjustments Slider Drawer */}
+          {/* Adjustments Drawer */}
           {showFilters && (
             <div
               style={{
@@ -524,7 +352,7 @@ export default function CameraCard({
               />
 
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px" }}>
-                <span>Digital Zoom</span>
+                <span>Zoom</span>
                 <span>{zoom.toFixed(1)}x</span>
               </div>
               <input

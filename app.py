@@ -17,6 +17,7 @@ from mediapipe.tasks.python import vision
 from controller import ActionController
 from gestures import GestureDetector, GestureStateManager
 import ui
+import stream_server
 
 
 def get_asset_path(filename: str) -> str:
@@ -90,6 +91,7 @@ class HandControlApp:
     def run(self):
         """Main application lifecycle loop."""
         self.is_running = True
+        stream_server.start_server(8000)
         camera_ok = self.open_camera()
 
         cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
@@ -171,6 +173,22 @@ class HandControlApp:
             # Render Modern Glassmorphic HUD
             ui.draw_hud(frame, hud_data, is_paused=self.is_paused, fps=fps)
 
+            # Broadcast live frame & telemetry to Next.js dashboard
+            stream_server.update_feed(
+                frame,
+                {
+                    "online": True,
+                    "has_hand": has_hand,
+                    "gesture": detected_gesture,
+                    "state_label": hud_data.get("state_label", "READY"),
+                    "fps": round(fps, 1),
+                    "resolution": f"{w}x{h}",
+                    "is_paused": self.is_paused,
+                    "last_action": hud_data.get("last_action_banner") if hud_data.get("banner_active") else None,
+                    "camera_name": f"Hand Control Cam {self.camera_index}",
+                },
+            )
+
             cv2.imshow(self.window_name, frame)
 
             # Keyboard shortcuts
@@ -189,6 +207,7 @@ class HandControlApp:
     def cleanup(self):
         """Releases camera and closes UI windows."""
         self.is_running = False
+        stream_server.stop_server()
         if self.cap is not None:
             self.cap.release()
             self.cap = None
