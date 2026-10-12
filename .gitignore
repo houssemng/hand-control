@@ -1,0 +1,24 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python byte-code and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# PyInstaller build outputs (HandControl.exe is ~117MB which exceeds GitHub's 100MB limit)
+# Built binaries are distributed via GitHub Releases
+build/
+dist/
+*.spec
+HandControl.exe
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

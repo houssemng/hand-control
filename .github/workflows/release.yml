@@ -1,0 +1,59 @@
+name: Build and Release HandControl
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run logic tests
+        run: |
+          python test_logic.py
+
+      - name: Download model if not present
+        shell: pwsh
+        run: |
+          if (-not (Test-Path hand_landmarker.task)) {
+            Invoke-WebRequest -Uri "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task" -OutFile "hand_landmarker.task"
+          }
+
+      - name: Build Standalone HandControl.exe
+        run: |
+          python build_exe.py
+
+      - name: Upload HandControl.exe Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HandControl-Windows-x64
+          path: HandControl.exe
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: HandControl.exe
+          name: Hand Control ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
